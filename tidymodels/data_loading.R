@@ -66,10 +66,35 @@ batting_summary[batting_summary$OPS_Incr_Perc > 0.8 &
 
 batting_summary[batting_summary$HR > 35,]
 
+#Add in known steroid users
+known_steroids <- read.csv('C:/Users/jlomb/Documents/Personal Coding/tidymodels/mlb_steroid_users.csv')
+
+parent_data$FullName <- paste0(parent_data$nameFirst,' ',parent_data$nameLast)
+
+batting_summary$FullName <- parent_data$FullName[match(paste0(batting_summary$playerID),
+                                                       paste0(parent_data$playerID))]
+
+batting_summary$KnownSteroid <- 0
+batting_summary$KnownSteroid[batting_summary$FullName %in% known_steroids$Player.Name] <- 1
 
 #-------------------------------------------------------------------------------
 #Some modeling
+##See https://machinelearningmastery.com/one-class-classification-algorithms/
+##for later actual outlier detection type models
 
+#Split data up into test/train
+set.seed(314159)
+library(rsample)
+
+data_split <- initial_split(batting_summary, prop = 3/4)
+
+# Create data frames for the two sets:
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+
+
+#---------------
 
 svm_default <- svm_poly(mode = "classification")
 
