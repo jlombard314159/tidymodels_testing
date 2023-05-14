@@ -1,3 +1,10 @@
+#Goals: 5-10 min talk about data and general strategies to investigate
+##Feature engineering -> We make some assumptions about. how do we test these assumptions
+#(10mins) -> walk through the various ways I am making columns to split groups (steroid users vs not steroid users)
+##Modeling steps
+#Setting up an initial model, running, then updating
+##Tracking results somehow -> or maybe just using targets to set up these sorts of workflows
+
 rm(list=ls())
 
 library(tidymodels)
@@ -81,6 +88,9 @@ batting_summary <- batting %>% group_by(FullName) %>%
             PrevInjuryCount = sum(PreviousYearInjury > 150, na.rm=TRUE)/(length(yearID)-1),
             KnownSteroid = unique(KnownSteroid))
 
+batting_summary$HighPrevInjuryCount <- 0
+batting_summary$HighPrevInjuryCount[batting_summary$PrevInjuryCount > 0.5] <- 1
+
 batting_summary[batting_summary$OPS_Incr_Perc > 0.8 & 
                   batting_summary$Years > 5,]
 
@@ -110,13 +120,27 @@ steroid_use <- steroid_use %>%
 
 summary(steroid_use)
 
+steroid_use <- steroid_use %>% 
+  step_dummy(all_nominal_predictors())
 
-#---------------
+#-------------------------------------------------------------------------------------------------
+#To really iterate:
+#Fiddle with the assumptions for feature engineering
+#TODO: Steps below can be altered or possibly put int oa function (?)  to show the
+#various ways to alter things
+batting <- batting %>% group_by(playerID) %>% 
+  mutate(OPS_Change = OPS - lag(OPS))
 
-svm_default <- svm_poly(mode = "classification")
+#Lets define an outlier: OPS is high (?) and the avg ROC of OPS is abnormally high
+#abnormal: top 90% quantile
 
-svm_fit <- 
-  svm_default %>% 
-  fit(formula = )
+batting_summary <- batting %>% group_by(FullName) %>% 
+  summarize(OPS = mean(OPS), HR = mean(HR), OPS_Change_Avg = mean(OPS_Change, na.rm=TRUE),
+            SLUG = mean(SLUG), OPS_Incr_Perc = sum(OPS_Change > 0, na.rm=TRUE)/(length(yearID) - 1),
+            Years = length(yearID),
+            PrevInjuryCount = sum(PreviousYearInjury > 150, na.rm=TRUE)/(length(yearID)-1),
+            KnownSteroid = unique(KnownSteroid))
+
+#Fiddle with the modeling process
 
 
