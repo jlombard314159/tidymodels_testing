@@ -4,7 +4,7 @@
 ##Modeling steps
 #Setting up an initial model, running, then updating
 ##Tracking results somehow -> or maybe just using targets to set up these sorts of workflows
-
+#See https://mdneuzerling.com/post/machine-learning-pipelines-with-tidymodels-and-targets/
 rm(list=ls())
 
 library(tidymodels)
