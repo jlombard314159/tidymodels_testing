@@ -76,7 +76,8 @@ batting[batting$OPS > 1.3,]
 #-------------------------------------------------------------------------------#
 #Where to start. Maybe the average rate of change of OPS is too high
 batting <- batting %>% group_by(playerID) %>% 
-  mutate(OPS_Change = OPS - lag(OPS))
+  mutate(OPS_Change = OPS - lag(OPS),
+         HR_Change = HR - lag(HR))
 
 #Lets define an outlier: OPS is high (?) and the avg ROC of OPS is abnormally high
 #abnormal: top 90% quantile
@@ -86,7 +87,8 @@ batting_summary <- batting %>% group_by(FullName) %>%
             SLUG = mean(SLUG), OPS_Incr_Perc = sum(OPS_Change > 0, na.rm=TRUE)/(length(yearID) - 1),
             Years = length(yearID),
             PrevInjuryCount = sum(PreviousYearInjury > 150, na.rm=TRUE)/(length(yearID)-1),
-            KnownSteroid = unique(KnownSteroid))
+            KnownSteroid = unique(KnownSteroid),
+            HR_Incr_Perc = sum(HR_Change > 0, na.rm=TRUE)/(length(yearID)-1))
 
 batting_summary$HighPrevInjuryCount <- 0
 batting_summary$HighPrevInjuryCount[batting_summary$PrevInjuryCount > 0.5] <- 1
@@ -121,7 +123,66 @@ steroid_use <- steroid_use %>%
 summary(steroid_use)
 
 steroid_use <- steroid_use %>% 
-  step_dummy(all_nominal_predictors())
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors)
+
+full_steroid_model <- recipe(KnownSteroid ~ .,
+         data = train_data) %>% 
+  update_role(FullName, new_role = 'Player Name') %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors())
+
+subset_steroid_model <- recipe(KnownSteroid ~ OPS + OPS_Change_Avg + OPS_Incr_Perc + Years +
+      PrevInjuryCount + HR_Incr_Perc,data = train_data) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors())
+
+#------------------------------------------------------------------------------------------------
+#Actual modeling
+
+log_reg <- logistic_reg() %>% 
+  set_engine("glm")
+
+steroid_use_mflow <- 
+  workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(steroid_use)
+
+steroid_fit <- 
+  steroid_use_mflow %>% 
+  fit(data = train_data)
+
+steroid_fit %>% 
+  extract_fit_parsnip() %>% 
+  tidy()
+
+flights_aug %>% 
+  roc_curve(truth = arr_delay, .pred_late) %>% 
+  autoplot()
+
+#----------------------------------------------------------------------------------------------
+# a much better holistic resource (https://www.tmwr.org/workflow-sets.html)
+all_steroid_models <- 
+  workflow_set(
+    preproc = list(full_model= full_steroid_model, subset_model = subset_steroid_model),
+    models = list(lr = log_reg),
+    cross = TRUE
+)
+
+train_folds  <- vfold_cv(train_data, strata = KnownSteroid, repeats = 5)
+
+test <- all_steroid_models %>%
+  workflow_map(resamples = train_folds)
+
+test %>% 
+  rank_results() %>% 
+  filter(.metric == "roc_auc") 
 
 #-------------------------------------------------------------------------------------------------
 #To really iterate:
