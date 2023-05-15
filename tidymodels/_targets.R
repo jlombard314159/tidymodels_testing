@@ -1,60 +1,27 @@
-#See: https://books.ropensci.org/targets/walkthrough.html
+# Created by use_targets().
+# Follow the comments below to fill in this target script.
+# Then follow the manual to check and run the pipeline:
+#   https://books.ropensci.org/targets/walkthrough.html#inspect-the-pipeline # nolint
+
+# Load packages required to define the pipeline:
 library(targets)
-source("R/define_coffee_recipe.R")
+# library(tarchetypes) # Load other packages as needed
 
-tar_options(packages = c("tidyverse", "tidymodels"))
-
-tar_pipeline(
-  tar_target(
-    coffee,
-    tidytuesdayR::tt_load(2020, week = 28)$coffee,
-    cue = tar_cue("never")
-  ),
-  tar_target(coffee_split, initial_split(coffee, prop = 0.8)),
-  tar_target(coffee_train, training(coffee_split)),
-  tar_target(coffee_test, testing(coffee_split)),
-  tar_target(coffee_recipe, define_coffee_recipe(coffee_train)),
-  tar_target(
-    coffee_model,
-    rand_forest(
-      trees = tune(),
-      mtry = tune()
-    ) %>% set_engine("ranger") %>% set_mode("regression")
-  ),
-  tar_target(
-    coffee_workflow,
-    workflow() %>% add_recipe(coffee_recipe) %>% add_model(coffee_model)
-  ),
-  tar_target(
-    coffee_grid,
-    expand_grid(mtry = 3:5, trees = seq(500, 1500, by = 200))
-  ),
-  tar_target(
-    coffee_grid_results,
-    coffee_workflow %>%
-      tune_grid(resamples = vfold_cv(coffee_train, v = 5), grid = coffee_grid)
-  ),
-  tar_target(
-    hyperparameters,
-    select_by_pct_loss(coffee_grid_results, metric = "rmse", limit = 5, trees)
-  ),
-  tar_target(
-    fitted_coffee_model,
-    coffee_workflow %>% finalize_workflow(hyperparameters) %>% fit(coffee_train)
-  ),
-  tar_target(
-    metrics,
-    fitted_coffee_model %>%
-      predict(coffee_test) %>%
-      metric_set(rmse, mae, rsq)(coffee_test$cupper_points, .pred)
-  )
+# Set target options:
+tar_option_set(
+  packages = c("tidymodels","ggplot2","dplyr"), # packages that your targets need to run
+  format = "rds" # default storage format
+  # Set other options as needed.
 )
 
-##A simpler example from the demo 
-# tar_option_set(packages = c("readr", "dplyr", "ggplot2"))
-# list(
-#   tar_target(file, "data.csv", format = "file"),
-#   tar_target(data, get_data(file)),
-#   tar_target(model, fit_model(data)),
-#   tar_target(plot, plot_model(model, data))
-# )
+# tar_make_clustermq() configuration (okay to leave alone):
+options(clustermq.scheduler = "multiprocess")
+
+# Run the R scripts in the R/ folder with your custom functions:
+tar_source()
+# source("other_functions.R") # Source other scripts as needed. # nolint
+
+# Corresponds to a step in the process
+list(
+ tar_target()
+)

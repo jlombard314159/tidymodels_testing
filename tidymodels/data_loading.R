@@ -7,13 +7,19 @@
 #See https://mdneuzerling.com/post/machine-learning-pipelines-with-tidymodels-and-targets/
 rm(list=ls())
 
+##TODO: Functionize a lot of the code (mainly for targets)
+##TODO: Finish the single walkthrough
+##TODO: Finish the demonstration of the more complex step
+##TODO: Do a plot of the various models or something (on training data)
+##TODO: Show the pipeline being ran in targets
+
 library(tidymodels)
 library(dplyr)
 library(ggplot2)
 options(tibble.width = Inf)
 
-batting <- read.csv('C:/Users/jlomb/Documents/Personal Coding/tidymodels/Batting.csv')
-parent_data <- read.csv('C:/Users/jlomb/Documents/Personal Coding/tidymodels/Master.csv')
+batting <- read.csv('C:/Users/jlomb/Documents/PersonalProjects/tidymodels_testing/Batting.csv')
+parent_data <- read.csv('C:/Users/jlomb/Documents/PersonalProjects/tidymodels_testing/Master.csv')
 # pitching <- read.csv('C:/Users/jlomb/Documents/Personal Coding/tidymodels/Pitching.csv')
 
 batting$SF[is.na(batting$SF)] <- 0
@@ -43,7 +49,7 @@ batting <- batting %>%  filter(playerID %in% short_stint$playerID)
 
 #Steroid specific information
 #Add in known steroid users
-known_steroids <- read.csv('C:/Users/jlomb/Documents/Personal Coding/tidymodels/mlb_steroid_users.csv')
+known_steroids <- read.csv('C:/Users/jlomb/Documents/PersonalProjects/tidymodels_testing/mlb_steroid_users.csv')
 
 parent_data$FullName <- paste0(parent_data$nameFirst,' ',parent_data$nameLast)
 
@@ -59,6 +65,7 @@ batting$SteroidEra <- as.factor(batting$SteroidEra)
 
 #As expected
 batting[batting$OPS > 1.3,]
+
 # 
 # plot_metric_by_year <- function(data,metric){
 #   
@@ -69,10 +76,6 @@ batting[batting$OPS > 1.3,]
 #   geom_point(alpha = 0.25)
 #   geom_smooth()
 
-
-#-------------------------------------------------------------------------------
-#Add in list of known steroid users (very small list)
-  
 #-------------------------------------------------------------------------------#
 #Where to start. Maybe the average rate of change of OPS is too high
 batting <- batting %>% group_by(playerID) %>% 
@@ -126,21 +129,6 @@ steroid_use <- steroid_use %>%
   step_dummy(all_nominal_predictors()) %>% 
   step_zv(all_predictors()) %>% 
   step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
-  step_normalize(all_numeric_predictors)
-
-full_steroid_model <- recipe(KnownSteroid ~ .,
-         data = train_data) %>% 
-  update_role(FullName, new_role = 'Player Name') %>% 
-  step_dummy(all_nominal_predictors()) %>% 
-  step_zv(all_predictors()) %>% 
-  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
-  step_normalize(all_numeric_predictors())
-
-subset_steroid_model <- recipe(KnownSteroid ~ OPS + OPS_Change_Avg + OPS_Incr_Perc + Years +
-      PrevInjuryCount + HR_Incr_Perc,data = train_data) %>% 
-  step_dummy(all_nominal_predictors()) %>% 
-  step_zv(all_predictors()) %>% 
-  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
   step_normalize(all_numeric_predictors())
 
 #------------------------------------------------------------------------------------------------
@@ -152,7 +140,7 @@ log_reg <- logistic_reg() %>%
 steroid_use_mflow <- 
   workflow() %>% 
   add_model(log_reg) %>% 
-  add_recipe(steroid_use)
+  add_recipe(full_steroid_model)
 
 steroid_fit <- 
   steroid_use_mflow %>% 
@@ -162,46 +150,76 @@ steroid_fit %>%
   extract_fit_parsnip() %>% 
   tidy()
 
-flights_aug %>% 
-  roc_curve(truth = arr_delay, .pred_late) %>% 
-  autoplot()
-
 #----------------------------------------------------------------------------------------------
 # a much better holistic resource (https://www.tmwr.org/workflow-sets.html)
+
+full_steroid_model <- recipe(KnownSteroid ~ .,
+                             data = train_data) %>% 
+  update_role(FullName, new_role = 'Player Name') %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors())
+
+subset_steroid_model <- recipe(KnownSteroid ~ OPS + OPS_Change_Avg + OPS_Incr_Perc + Years +
+                                 PrevInjuryCount + HR_Incr_Perc,data = train_data) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors())
+
+minimum_model <- recipe(KnownSteroid ~OPS_Change_Avg + OPS_Incr_Perc + Years +
+                          PrevInjuryCount,data = train_data) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors())
+
+rf_spec <- 
+  rand_forest(mtry = 5, min_n = tune(), trees = 25) %>% 
+  set_engine("randomForest") %>% 
+  set_mode("classification")
+
 all_steroid_models <- 
   workflow_set(
-    preproc = list(full_model= full_steroid_model, subset_model = subset_steroid_model),
-    models = list(lr = log_reg),
+    preproc = list(full_model= full_steroid_model, subset_model = subset_steroid_model,
+                   minimum_model = minimum_model),
+    models = list(lr = log_reg, rf = rf_spec),
     cross = TRUE
 )
 
 train_folds  <- vfold_cv(train_data, strata = KnownSteroid, repeats = 5)
 
-test <- all_steroid_models %>%
+all_models <- all_steroid_models %>%
   workflow_map(resamples = train_folds)
 
-test %>% 
+all_models %>% 
   rank_results() %>% 
-  filter(.metric == "roc_auc") 
+  filter(.metric == 'accuracy') %>% 
+  select(model, .config, rank)
 
-#-------------------------------------------------------------------------------------------------
-#To really iterate:
-#Fiddle with the assumptions for feature engineering
-#TODO: Steps below can be altered or possibly put int oa function (?)  to show the
-#various ways to alter things
-batting <- batting %>% group_by(playerID) %>% 
-  mutate(OPS_Change = OPS - lag(OPS))
+#-----------------------------------------------------------------
+#Select a top model (maybe do in another script)
+best_results <- all_models %>% 
+  extract_workflow_set_result("subset_model_lr") %>% 
+  select_best(metric = 'accuracy')
 
-#Lets define an outlier: OPS is high (?) and the avg ROC of OPS is abnormally high
-#abnormal: top 90% quantile
+best_results
 
-batting_summary <- batting %>% group_by(FullName) %>% 
-  summarize(OPS = mean(OPS), HR = mean(HR), OPS_Change_Avg = mean(OPS_Change, na.rm=TRUE),
-            SLUG = mean(SLUG), OPS_Incr_Perc = sum(OPS_Change > 0, na.rm=TRUE)/(length(yearID) - 1),
-            Years = length(yearID),
-            PrevInjuryCount = sum(PreviousYearInjury > 150, na.rm=TRUE)/(length(yearID)-1),
-            KnownSteroid = unique(KnownSteroid))
+#---------------------------------------------------------------
+#Handle class imbalance
+# https://juliasilge.com/blog/himalayan-climbing/
 
-#Fiddle with the modeling process
+#---------------------------------------------------------------
+#Do something with the test data now (?)
 
+
+#----------------------------------------------------------------
+#Reusing steps
+#No clue how to 
+test_recipe <- recipe() %>% 
+step_dummy(all_nominal_predictors()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
+  step_normalize(all_numeric_predictors())
 
