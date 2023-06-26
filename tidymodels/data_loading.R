@@ -111,7 +111,9 @@ batting_summary[batting_summary$HR > 35,]
 set.seed(314159)
 library(rsample)
 
-data_split <- initial_split(batting_summary, prop = 3/4)
+#Split up by strata (steroid usage)
+data_split <- initial_split(batting_summary, prop = 3/4,
+                            strata = KnownSteroid)
 
 # Create data frames for the two sets:
 train_data <- training(data_split)
