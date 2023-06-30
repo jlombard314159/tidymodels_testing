@@ -22,6 +22,7 @@ batting <- read.csv('C:/Users/jlomb/Documents/PersonalProjects/tidymodels_testin
 parent_data <- read.csv('C:/Users/jlomb/Documents/PersonalProjects/tidymodels_testing/Master.csv')
 # pitching <- read.csv('C:/Users/jlomb/Documents/Personal Coding/tidymodels/Pitching.csv')
 
+#Remove some NA values
 batting$SF[is.na(batting$SF)] <- 0
 batting$IBB[is.na(batting$IBB)] <- 0
 
@@ -34,7 +35,7 @@ batting <- batting %>% group_by(playerID) %>%
   mutate(PreviousYearInjury = AB - lag(AB))
 
 batting <- batting %>% filter(yearID > 1945) %>% 
-  filter(AB > 130) %>% 
+  filter(AB > 60) %>% 
   mutate(OB_perc = (H+BB + HBP)/(AB + HBP +BB+SF),
          X1B = (H - HR - X2B - X3B),
          SLUG = (X1B + 2 * X2B + 3*X3B + 4*HR)/AB,
@@ -74,7 +75,7 @@ batting[batting$OPS > 1.3,]
 # 
 # ggplot(batting, aes(x = yearID, y =OPS, colour = SteroidEra)) + 
 #   geom_point(alpha = 0.25)
-#   geom_smooth()
+#   geom_smooth(
 
 #-------------------------------------------------------------------------------#
 #Where to start. Maybe the average rate of change of OPS is too high
@@ -101,6 +102,12 @@ batting_summary[batting_summary$OPS_Incr_Perc > 0.8 &
 
 batting_summary[batting_summary$HR > 35,]
 
+batting_summary %>% group_by(KnownSteroid) %>% 
+  summarize(mean(HR),
+            mean(SLUG),
+            mean(OPS),
+            mean(OPS_Incr_Perc),
+            mean(HR_Incr_Perc))
 
 #-------------------------------------------------------------------------------
 #Some modeling
@@ -142,7 +149,7 @@ log_reg <- logistic_reg() %>%
 steroid_use_mflow <- 
   workflow() %>% 
   add_model(log_reg) %>% 
-  add_recipe(full_steroid_model)
+  add_recipe(steroid_use)
 
 steroid_fit <- 
   steroid_use_mflow %>% 
@@ -163,14 +170,7 @@ full_steroid_model <- recipe(KnownSteroid ~ .,
   step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
   step_normalize(all_numeric_predictors())
 
-subset_steroid_model <- recipe(KnownSteroid ~ OPS + OPS_Change_Avg + OPS_Incr_Perc + Years +
-                                 PrevInjuryCount + HR_Incr_Perc,data = train_data) %>% 
-  step_dummy(all_nominal_predictors()) %>% 
-  step_zv(all_predictors()) %>% 
-  step_mutate(KnownSteroid = as.factor(KnownSteroid)) %>% 
-  step_normalize(all_numeric_predictors())
-
-minimum_model <- recipe(KnownSteroid ~OPS_Change_Avg + OPS_Incr_Perc + Years +
+minimum_model <- recipe(KnownSteroid ~ HR + Years + 
                           PrevInjuryCount,data = train_data) %>% 
   step_dummy(all_nominal_predictors()) %>% 
   step_zv(all_predictors()) %>% 
@@ -182,11 +182,16 @@ rf_spec <-
   set_engine("randomForest") %>% 
   set_mode("classification")
 
+elastic_net <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine('glmnet')
+
 all_steroid_models <- 
   workflow_set(
-    preproc = list(full_model= full_steroid_model, subset_model = subset_steroid_model,
+    preproc = list(full_model= full_steroid_model,
                    minimum_model = minimum_model),
-    models = list(lr = log_reg, rf = rf_spec),
+    models = list(lr = log_reg, rf = rf_spec,
+                  glmnet = elastic_net),
     cross = TRUE
 )
 
@@ -197,16 +202,29 @@ all_models <- all_steroid_models %>%
 
 all_models %>% 
   rank_results() %>% 
-  filter(.metric == 'accuracy') %>% 
-  select(model, .config, rank)
+  filter(.metric == 'roc_auc') %>% 
+  select(model, .config, rank, wflow_id)
 
 #-----------------------------------------------------------------
 #Select a top model (maybe do in another script)
 best_results <- all_models %>% 
-  extract_workflow_set_result("subset_model_lr") %>% 
-  select_best(metric = 'accuracy')
+  extract_workflow_set_result("minimum_model_lr") 
+  
+best_model <- all_models %>% 
+  extract_workflow('minimum_model_lr')
 
-best_results
+
+test_fit <-
+  best_model %>% 
+  last_fit(data_split)
+
+test_fit %>% 
+  collect_metrics()
+
+test_fit %>% 
+  collect_predictions() %>% 
+  roc_curve(KnownSteroid, .pred_1) %>% 
+  autoplot()
 
 #---------------------------------------------------------------
 #Handle class imbalance
